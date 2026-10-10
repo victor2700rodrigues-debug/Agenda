@@ -1,4 +1,4 @@
-# Agenda Clima
+# Climatiza
 
 App para quem faz manutenção de ar condicionado: agenda de serviços, manutenção pré-agendada em 3 ou 6 meses, lembretes com WhatsApp, clientes CPF/CNPJ, estoque de materiais, orçamentos com PDF.
 
