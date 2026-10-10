@@ -459,3 +459,21 @@ onAuthStateChanged(auth,u=>{
   const google=u.providerData.some(p=>p.providerId==="google.com");
   if(!u.emailVerified&&!google)return mostrarVerify(u);
   entrar(u)});
+
+// ---- App instalável (PWA) ----
+if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(e=>console.error(e)));
+const instalarBtn=document.getElementById("instalar");
+const jaInstalado=()=>matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
+const ehIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+const ehCelular=ehIOS||/android/i.test(navigator.userAgent);
+let pedidoInstalar=null;
+function mostrarInstalar(){instalarBtn.hidden=jaInstalado()||!(pedidoInstalar||ehCelular)}
+window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();pedidoInstalar=e;mostrarInstalar()});
+window.addEventListener("appinstalled",()=>{pedidoInstalar=null;mostrarInstalar();toast("Climatiza instalado")});
+instalarBtn.onclick=async()=>{
+  if(pedidoInstalar){pedidoInstalar.prompt();await pedidoInstalar.userChoice.catch(()=>{});pedidoInstalar=null;mostrarInstalar();return}
+  const passos=ehIOS
+    ?["Abra este site no <b>Safari</b>.","Toque no botão <b>Compartilhar</b> (o quadrado com a seta para cima).","Escolha <b>Adicionar à Tela de Início</b> e toque em <b>Adicionar</b>."]
+    :["Toque nos <b>três pontinhos</b> do navegador, no canto de cima.","Escolha <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.","Confirme em <b>Instalar</b>."];
+  openSheet(`<h3>Instalar o Climatiza</h3><ol class="passos">${passos.map(p=>`<li>${p}</li>`).join("")}</ol><p class="meta">Depois é só abrir pelo ícone do Climatiza, como qualquer app.</p><div class="sheet-actions"><button class="primary" data-close>Entendi</button></div>`)};
+mostrarInstalar();
