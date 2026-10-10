@@ -1,7 +1,7 @@
 // Service worker do Climatiza: guarda os arquivos do app para abrir rápido e sem internet.
 // Os dados (clientes, serviços etc.) ficam no cache do próprio Firestore, não aqui.
 // Ao mudar arquivos do app, troque a versão para os celulares baixarem a nova.
-const VERSAO = "climatiza-v1";
+const VERSAO = "climatiza-v2";
 const ARQUIVOS = ["./", "./index.html", "./app.js", "./firebase-config.js", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png"];
 

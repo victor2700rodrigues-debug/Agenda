@@ -49,61 +49,119 @@ const num=v=>{v=String(v||"").trim();if(v.includes(","))v=v.replace(/\./g,"").re
 const qfmt=n=>Number(n||0).toLocaleString("pt-BR",{maximumFractionDigits:2});
 const matTxt=s=>(s.materiais||[]).map(m=>qfmt(m.qtd)+" "+(m.unidade||"")+" "+m.nome).join(", ");
 const docLabel=c=>c.pessoa==="PJ"?"CNPJ":"CPF";
-function waLink(c,s){const dig=String(c.telefone||"").replace(/\D/g,"");if(dig.length<10)return"";
-  const num=dig.length<=11?"55"+dig:dig;
-  const msg=`Olá ${c.nome.split(" ")[0]}! Aqui é da manutenção de ar condicionado. Já está chegando a hora da manutenção preventiva do seu aparelho${c.equipamentos?" ("+c.equipamentos+")":""}. Posso agendar uma visita para você?`;
-  return"https://wa.me/"+num+"?text="+encodeURIComponent(msg)}
-
 /* ---------- render ---------- */
+const WDF=["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"],MESF=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+let diaSel=null,filtro="todos",lembSeg=null,nomeUser="";
+const primeiro=n=>String(n||"").trim().split(/\s+/)[0]||"";
+const moneyShort=v=>v>=1000?"R$ "+(v/1000).toLocaleString("pt-BR",{maximumFractionDigits:1})+" mil":(money(v)||"R$ 0");
+const isPJ=c=>c.pessoa==="PJ";
+const assinatura=()=>{const e=empresa().nome;return nomeUser?`Aqui é o ${primeiro(nomeUser)}${e?", da "+e:""}.`:e?`Aqui é da ${e}.`:""};
+function waHref(c,msg){const dig=String(c.telefone||"").replace(/\D/g,"");if(dig.length<10)return"";
+  return"https://wa.me/"+(dig.length<=11?"55"+dig:dig)+"?text="+encodeURIComponent(msg)}
+const mapsHref=c=>c.endereco?"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(c.endereco):"";
+function msgLembrete(s){const c=cli(s.clienteId),o=s.origemId&&S.servicos.get(s.origemId);
+  return`Olá, ${primeiro(c.nome)}! ${assinatura()} ${s.intervalo?`Já faz ${s.intervalo} meses da última ${(o?o.tipo:"manutenção").toLowerCase()} do seu ar condicionado.`:"Já está chegando a hora da manutenção preventiva do seu ar condicionado."} Posso agendar a próxima visita para esta semana?`.replace(/\s+/g," ")}
+function msgVisita(s,late){const c=cli(s.clienteId);
+  return(late?`Olá, ${primeiro(c.nome)}! ${assinatura()} Tive um imprevisto com a visita do seu ar condicionado. Podemos remarcar?`
+    :`Olá, ${primeiro(c.nome)}! ${assinatura()} Confirmando a visita de ${s.tipo.toLowerCase()} ${dayTitle(s.data).toLowerCase()}${s.hora?" às "+s.hora:""}. Tudo certo?`).replace(/\s+/g," ")}
+
+function svcCard(s,t,{withDay=false}={}){
+  const c=cli(s.clienteId),late=s.status==="agendado"&&s.data<t,ok=s.status==="concluido";
+  const cls=late?"late":ok?"ok":isPJ(c)?"pj":"";
+  const when=(withDay?(s.data===t?"hoje":dayTitle(s.data).toLowerCase())+(s.hora?" · ":""):"")+(s.hora||"");
+  const chips=[];
+  if(isPJ(c))chips.push(`<span class="chip bell" title="Cliente CNPJ">${BELL}CNPJ</span>`);
+  chips.push(late?'<span class="chip late">atrasado</span>':ok?'<span class="chip ok">✓ concluído</span>':isPJ(c)?"":'<span class="chip">agendado</span>');
+  if(isEx(s)||isEx(c))chips.push('<span class="chip ex">exemplo</span>');
+  const meta=[esc(s.tipo)+(s.valor?" · "+money(s.valor):"")];
+  if(c.endereco)meta.push(esc(c.endereco));if(c.equipamentos)meta.push("Equipamento: "+esc(c.equipamentos));
+  if(matTxt(s))meta.push("Materiais: "+esc(matTxt(s)));if(s.obs)meta.push(esc(s.obs));
+  let acts="";
+  if(s.status==="agendado"){const wa=waHref(c,msgVisita(s,late)),mp=mapsHref(c);
+    acts=`<div class="btns">${wa?`<a class="wa" href="${wa}" target="_blank" rel="noopener">${late?"Avisar atraso":"WhatsApp"}</a>`:""}${mp?`<a href="${mp}" target="_blank" rel="noopener">Rota</a>`:""}<button class="p" data-act="concluir" data-id="${s.id}">Concluir</button></div>
+     <div class="links"><button data-act="editar" data-id="${s.id}">${late?"Remarcar":"Editar"}</button><button data-act="cancelar" data-id="${s.id}">Cancelar</button></div>`}
+  return`<div class="card ${cls}"><div class="top-row"><span class="hr">${when||"sem hora"}</span><span>${chips.join(" ")}</span></div>
+   <p class="nm">${esc(c.nome)}</p><p class="meta" style="margin:0">${meta.join("<br>")}</p>${acts}</div>`}
+
 function render(){
   const t=today(),all=svcs();
   const agendados=all.filter(s=>s.status==="agendado").sort(byDate);
   const previstos=all.filter(s=>s.status==="previsto").sort(byDate);
   const lembAtivos=previstos.filter(s=>diffDays(t,s.data)<=30);
-  document.getElementById("s-hoje").textContent=agendados.filter(s=>s.data===t).length;
-  document.getElementById("s-semana").textContent=agendados.filter(s=>{const n=diffDays(t,s.data);return n>=0&&n<=7}).length;
-  document.getElementById("s-lemb").textContent=lembAtivos.length;
   const b=document.getElementById("b-lemb");b.hidden=!lembAtivos.length;b.textContent=lembAtivos.length;
-  renderAgenda(agendados,t);renderLembretes(previstos,t);renderClientes();renderEstoque();renderOrcamentos();
+  renderAgenda(all,agendados,lembAtivos,t);renderLembretes(previstos,lembAtivos,t);renderClientes();renderEstoque();renderOrcamentos();
   const baixo=[...S.materiais.values()].filter(m=>m.minimo&&(+m.quantidade||0)<=+m.minimo).length;
   const be=document.getElementById("b-est");be.hidden=!baixo;be.textContent=baixo;
 }
-function itemHTML(s,opts){
-  const c=cli(s.clienteId);
-  const chips=[];
-  if(opts.late)chips.push(`<span class="chip late">${opts.lateLabel||"Atrasado"}</span>`);
-  if(opts.chip)chips.push(opts.chip);
-  if(opts.pjAlert&&c.pessoa==="PJ")chips.unshift(`<span class="chip bell" title="Cliente CNPJ">${BELL}CNPJ</span>`);
-  if(isEx(s)||isEx(c))chips.push(`<span class="chip ex">exemplo</span>`);
-  return`<div class="item${opts.pjAlert&&c.pessoa==="PJ"?" pj":""}"><div class="when">${opts.when}</div><div class="body">
-   <div class="line1"><strong>${esc(c.nome)}</strong>${chips.join("")}</div>
-   <div class="meta">${esc(s.tipo)}${s.valor?" · "+money(s.valor):""}${c.endereco?" · "+esc(c.endereco):""}</div>
-   ${c.equipamentos?`<div class="meta">Equipamento: ${esc(c.equipamentos)}</div>`:""}
-   ${s.obs?`<div class="meta">${esc(s.obs)}</div>`:""}
-   ${matTxt(s)?`<div class="meta">Materiais: ${esc(matTxt(s))}</div>`:""}
-   <div class="actions">${opts.actions}</div></div></div>`}
-function renderAgenda(list,t){
-  const el=document.getElementById("p-agenda");
-  if(!list.length){el.innerHTML=`<div class="empty"><strong>Nenhum serviço agendado</strong>Toque em “+ Novo serviço” para marcar uma visita. Quando concluir um serviço, a próxima manutenção já fica pré-agendada nos lembretes.</div>`;return}
-  const groups=new Map();
-  for(const s of list){const k=s.data<t?"__late":s.data;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(s)}
-  el.innerHTML=[...groups.entries()].map(([k,arr])=>`<div class="group"><h2 class="${k==="__late"?"late":""}">${k==="__late"?"Atrasados, ainda não concluídos":dayTitle(k)}<span>${arr.length}</span></h2>${arr.map(s=>itemHTML(s,{
-    when:k==="__late"?`${short(s.data)}<small>${esc(s.hora||"")}</small>`:(s.hora?esc(s.hora):`<small>sem hora</small>`),
-    late:k==="__late",pjAlert:true,
-    actions:`<button class="small primary" data-act="concluir" data-id="${s.id}">Concluir</button><button class="small" data-act="editar" data-id="${s.id}">Editar</button><button class="small ghost" data-act="cancelar" data-id="${s.id}">Cancelar</button>`
-  })).join("")}</div>`).join("")}
-function renderLembretes(list,t){
+function renderAgenda(all,agendados,lembAtivos,t){
+  const el=document.getElementById("p-agenda"),h=new Date().getHours(),d=parse(t);
+  const hoje=agendados.filter(s=>s.data===t).length;
+  const mes=t.slice(0,7),fat=all.filter(s=>s.status==="concluido"&&String(s.data).startsWith(mes)).reduce((a,s)=>a+(+s.valor||0),0);
+  let html=`<div><h2 class="hello">${h<12?"Bom dia":h<18?"Boa tarde":"Boa noite"}${nomeUser?", "+esc(primeiro(nomeUser)):""}</h2>
+   <p class="meta">${WDF[d.getDay()]}, ${d.getDate()} de ${MESF[d.getMonth()]} · ${hoje?hoje+(hoje>1?" serviços hoje":" serviço hoje"):"nenhum serviço hoje"}</p></div>
+   <div class="summary">
+    <button class="stat" data-act="dia" data-dia="${t}"><i style="background:var(--accent-soft)">🗓️</i><b>${hoje}</b><span>Hoje</span></button>
+    <button class="stat" data-act="filtro" data-f="concluidos"><i style="background:var(--ok-soft)">💰</i><b class="money">${moneyShort(fat)}</b><span>No mês</span></button>
+    <button class="stat alert" data-go="lembretes"><i style="background:var(--warn-soft)">🔔</i><b>${lembAtivos.length}</b><span>Para oferecer</span></button>
+   </div>`;
+  const prox=agendados.find(s=>s.data>=t);
+  if(prox)html+=`<div class="group"><div class="sec"><h2>Próximo serviço</h2></div>${svcCard(prox,t,{withDay:true})}</div>`;
+  const low=[...S.materiais.entries()].map(([id,m])=>({id,...m})).filter(m=>m.minimo&&(+m.quantidade||0)<=+m.minimo).slice(0,4);
+  if(low.length)html+=`<div class="group"><div class="sec"><h2>Estoque baixo</h2><button data-go="estoque">Ver estoque</button></div><div class="card" style="padding-left:12px">${low.map(m=>{const q=+m.quantidade||0,pct=Math.max(4,Math.min(100,q/(2*m.minimo)*100));
+    return`<div class="low"><div class="top-row"><span>${esc(m.nome)}</span><span class="chip ${q<=0?"late":"warn"}">${qfmt(q)} ${esc(m.unidade||"un")}</span></div><div class="lowbar"><i class="${q<=0?"zero":""}" style="width:${q<=0?100:pct}%"></i></div></div>`}).join("")}</div></div>`;
+  const atras=agendados.filter(s=>s.data<t);
+  if(atras.length)html+=`<div class="group"><div class="sec"><h2 style="color:var(--late)">Atrasados (${atras.length})</h2></div>${atras.map(s=>svcCard(s,t,{withDay:true})).join("")}</div>`;
+  // faixa de dias
+  const dias=[];for(let i=-1;i<14;i++)dias.push(addDays(t,i));
+  const porDia=new Map();for(const s of agendados){if(!porDia.has(s.data))porDia.set(s.data,[]);porDia.get(s.data).push(s)}
+  html+=`<div class="group"><div class="sec"><h2>${diaSel?dayTitle(diaSel):"Agenda"}</h2>${diaSel?'<button data-act="dia" data-dia="">Ver todos os próximos</button>':""}</div>
+   <div class="days">${dias.map(x=>{const ss=porDia.get(x)||[],dd=parse(x),pj=ss.some(s=>isPJ(cli(s.clienteId)));
+     return`<button class="day${x===t?" hoje":""}" data-act="dia" data-dia="${x}" aria-pressed="${x===diaSel}">${WD[dd.getDay()]}<b>${dd.getDate()}</b><i class="${ss.length?(pj?"pj":"s"):""}"></i></button>`}).join("")}</div>
+   <div class="filters">${[["todos","Todos"],["cnpj","🔔 CNPJ"],["pendentes","Pendentes"],["concluidos","Concluídos"]].map(([k,l])=>`<button data-act="filtro" data-f="${k}" aria-pressed="${filtro===k}">${l}</button>`).join("")}</div>`;
+  let lista;
+  if(diaSel)lista=all.filter(s=>s.data===diaSel&&(s.status==="agendado"||s.status==="concluido"));
+  else if(filtro==="concluidos"){const ini=addDays(t,-30);lista=all.filter(s=>s.status==="concluido"&&s.data>=ini).sort(byDate).reverse()}
+  else lista=agendados.filter(s=>s.data>=t);
+  if(filtro==="cnpj")lista=lista.filter(s=>isPJ(cli(s.clienteId)));
+  if(filtro==="pendentes")lista=lista.filter(s=>s.status==="agendado");
+  if(filtro==="concluidos")lista=lista.filter(s=>s.status==="concluido");
+  if(diaSel)lista.sort(byDate);
+  if(!lista.length){
+    const vazio=!all.some(s=>s.status==="agendado"||s.status==="concluido");
+    html+=vazio?`<div class="empty"><strong>Nenhum serviço agendado</strong>Toque no + para marcar uma visita. Quando concluir um serviço, a próxima manutenção já fica pré-agendada nos lembretes.</div>`
+      :`<div class="empty">Nada ${filtro==="concluidos"?"concluído":"agendado"}${filtro==="cnpj"?" de CNPJ":""} ${diaSel?"neste dia":filtro==="concluidos"?"nos últimos 30 dias":"daqui para frente"}.</div>`}
+  else if(diaSel)html+=lista.map(s=>svcCard(s,t)).join("");
+  else{let last="";for(const s of lista){if(s.data!==last){last=s.data;html+=`<h3 class="meta" style="margin:6px 0 0;font-weight:600;text-transform:uppercase;letter-spacing:.06em;font-size:12px">${dayTitle(s.data)}</h3>`}html+=svcCard(s,t)}}
+  html+="</div>";
+  el.innerHTML=html}
+function renderLembretes(list,ativos,t){
   const el=document.getElementById("p-lembretes");
   if(!list.length){el.innerHTML=`<div class="empty"><strong>Nenhuma manutenção pré-agendada</strong>Ao concluir um serviço na Agenda, escolha 3 ou 6 meses e o cliente aparece aqui na hora certa de oferecer a manutenção de novo.</div>`;return}
-  const g={late:[],soon:[],later:[]};
-  for(const s of list){const n=diffDays(t,s.data);(n<0?g.late:n<=30?g.soon:g.later).push(s)}
-  const sect=(key,title,cls)=>g[key].length?`<div class="group"><h2 class="${cls}">${title}<span>${g[key].length}</span></h2>${g[key].map(s=>{
-    const c=cli(s.clienteId),n=diffDays(t,s.data),wa=waLink(c,s);
-    return itemHTML(s,{when:`${short(s.data)}<small>${n<0?Math.abs(n)+" d atrás":n===0?"hoje":"em "+n+" d"}</small>`,
-      late:n<0,lateLabel:"Venceu",
-      chip:s.intervalo?`<span class="chip ${n<=30?"warn":"mute"}">ciclo de ${s.intervalo} meses</span>`:"",
-      actions:`<button class="small primary" data-act="agendar" data-id="${s.id}">Agendar visita</button>${wa?`<a href="${wa}" target="_blank" rel="noopener">WhatsApp</a>`:""}<button class="small" data-act="copiar" data-id="${s.id}">Copiar mensagem</button><button class="small ghost" data-act="dispensar" data-id="${s.id}">Cliente não quis</button>`})}).join("")}</div>`:"";
-  el.innerHTML=sect("late","Vencidos, oferecer já","late")+sect("soon","Próximos 30 dias","soon")+sect("later","Mais adiante","")}
+  const g={late:[],semana:[],prox:[]};
+  for(const s of list){const n=diffDays(t,s.data);(n<0?g.late:n<=7?g.semana:g.prox).push(s)}
+  if(!lembSeg||!g[lembSeg].length)lembSeg=["late","semana","prox"].find(k=>g[k].length);
+  const pot=ativos.reduce((a,s)=>{const o=s.origemId&&S.servicos.get(s.origemId);return a+(o&&+o.valor||0)},0);
+  const n=ativos.length;
+  let html=n?`<div class="banner"><div><strong>${n} ${n>1?"clientes":"cliente"} para oferecer</strong><span class="meta">${pot?"Potencial de "+money(pot)+" em manutenções":"Mande uma mensagem e agende a próxima visita"}</span></div><span class="ic" aria-hidden="true">🔔</span></div>`:"";
+  html+=`<div class="filters">${[["late","Vencidos"],["semana","Esta semana"],["prox","Próximos"]].map(([k,l])=>`<button data-act="lseg" data-f="${k}" aria-pressed="${lembSeg===k}">${l} (${g[k].length})</button>`).join("")}</div>`;
+  html+=g[lembSeg].map(s=>{const c=cli(s.clienteId),d=diffDays(t,s.data),o=s.origemId&&S.servicos.get(s.origemId);
+    const chip=d<0?`<span class="chip late">venceu há ${-d} ${d===-1?"dia":"dias"}</span>`:d===0?'<span class="chip warn">vence hoje</span>':d===1?'<span class="chip warn">vence amanhã</span>':`<span class="chip ${d<=7?"warn":"mute"}">vence em ${d} dias</span>`;
+    return`<div class="card ${d<0?"late":isPJ(c)?"pj":d>30?"mute":""}"><div class="top-row"><p class="nm">${esc(c.nome)}</p><span>${isPJ(c)?`<span class="chip bell">${BELL}CNPJ</span> `:""}${chip}</span></div>
+     <p class="meta" style="margin:0">${o?`Última ${esc(o.tipo.toLowerCase())}: ${short(o.data)}`:`Previsto para ${short(s.data)}`}${s.intervalo?` · plano de ${s.intervalo} meses`:""}${isEx(s)||isEx(c)?' · <span class="chip ex">exemplo</span>':""}</p>
+     <div class="btns"><button class="wa" data-act="msg" data-id="${s.id}">💬 Mandar mensagem</button><button data-act="agendar" data-id="${s.id}">Agendar</button></div>
+     <div class="links"><button data-act="dispensar" data-id="${s.id}">Cliente não quis</button></div></div>`}).join("");
+  el.innerHTML=html}
+function sheetMsg(id){const s=S.servicos.get(id),c=cli(s.clienteId),tem=waHref(c,"x");
+  openSheet(`<h3>Mensagem para ${esc(primeiro(c.nome))}</h3><p class="meta">Confira o texto. Você pode mudar o que quiser antes de enviar.</p>
+   <textarea class="msg" id="m-txt">${esc(msgLembrete(s))}</textarea>${tem?"":'<p class="meta">Este cliente está sem telefone com DDD. Copie o texto ou cadastre o número na ficha dele.</p>'}
+   <div class="sheet-actions"><button id="cp">Copiar texto</button>${tem?'<button class="primary" id="wa">Enviar no WhatsApp</button>':""}</div>`,bg=>{
+    const tx=()=>bg.querySelector("#m-txt").value.trim();
+    bg.querySelector("#cp").onclick=()=>navigator.clipboard?.writeText(tx()).then(()=>toast("Mensagem copiada"),()=>toast(tx()));
+    const w=bg.querySelector("#wa");if(w)w.onclick=()=>{window.open(waHref(c,tx()),"_blank","noopener");close()}})}
+function sheetConta(){const u=auth.currentUser||{};
+  openSheet(`<h3>${esc(u.displayName||"Sua conta")}</h3><p class="meta">${esc(u.email||"")}</p><div class="conta">
+   <button data-act="empresa-dados">Seus dados no PDF do orçamento</button>${!instalarBtn.hidden?'<button data-act="instalar">Instalar app no celular</button>':""}<button id="sair">Sair da conta</button></div>
+   <div class="sheet-actions"><button data-close>Fechar</button></div>`,bg=>{bg.querySelector("#sair").onclick=()=>{close();signOut(auth)}})}
 function renderClientes(){
   const q=(document.getElementById("busca").value||"").toLowerCase().trim(),t=today(),all=svcs();
   const rows=[...S.clientes.entries()].map(([id,c])=>({id,...c})).filter(c=>!q||[c.nome,c.telefone,c.endereco,c.equipamentos,c.documento].join(" ").toLowerCase().includes(q)).sort((a,b)=>a.nome.localeCompare(b.nome,"pt-BR"));
@@ -392,13 +450,17 @@ document.addEventListener("click",e=>{
   if(t.dataset.tab||t.dataset.go)return setTab(t.dataset.tab||t.dataset.go);
   const id=t.dataset.id,s=S.servicos.get(id);
   switch(t.dataset.act){
+    case"dia":diaSel=t.dataset.dia&&t.dataset.dia!==diaSel?t.dataset.dia:null;if(tab!=="agenda")setTab("agenda");render();return;
+    case"filtro":filtro=t.dataset.f;if(filtro==="concluidos"&&t.classList.contains("stat"))diaSel=null;render();if(t.classList.contains("stat"))document.querySelector("#p-agenda .days")?.scrollIntoView({behavior:"smooth",block:"start"});return;
+    case"lseg":lembSeg=t.dataset.f;render();return;
+    case"msg":return sheetMsg(id);
+    case"empresa-dados":return sheetEmpresa();
+    case"instalar":close();return instalarBtn.click();
     case"concluir":return sheetConcluir(id);
     case"editar":return sheetServico(id);
     case"agendar":return sheetServico(id);
     case"cancelar":return sheetConfirm("Cancelar serviço?",`${esc(cli(s.clienteId).nome)}, ${dayTitle(s.data).toLowerCase()}.`,"Cancelar serviço",()=>{syncStock(s.materiais,[]);save("servicos",id,{...s,status:"cancelado",materiais:[]})});
     case"dispensar":return sheetConfirm("Tirar dos lembretes?","O lembrete deste cliente sai da lista. O histórico continua na ficha dele.","Tirar da lista",()=>save("servicos",id,{...s,status:"cancelado",obs:"Cliente não quis a manutenção"}));
-    case"copiar":{const c=cli(s.clienteId),msg=`Olá ${c.nome.split(" ")[0]}! Já está chegando a hora da manutenção preventiva do seu ar condicionado. Posso agendar uma visita para você?`;
-      navigator.clipboard?.writeText(msg).then(()=>toast("Mensagem copiada"),()=>toast(msg));return}
     case"cliente":return sheetFicha(id);
     case"entrada":return sheetEntrada(id);
     case"editmat":return sheetMaterial(id);
@@ -408,8 +470,9 @@ document.addEventListener("click",e=>{
     case"orc-copy":{const tx=orcTexto(S.orcamentos.get(id));navigator.clipboard?.writeText(tx).then(()=>toast("Orçamento copiado. Cole no WhatsApp."),()=>toast(tx));return}
     case"orc-del":return sheetConfirm("Excluir orçamento?",`Orçamento de ${esc(orcNome(S.orcamentos.get(id)))}.`,"Excluir",()=>remove("orcamentos",id));
   }});
-function setTab(n){tab=n;for(const k of TABS){document.getElementById("p-"+k).hidden=k!==n;document.getElementById("tab-"+k).setAttribute("aria-selected",k===n)}
-  const fl={estoque:"+ Cadastrar material",orcamentos:"+ Novo orçamento",clientes:"+ Novo cliente"};document.getElementById("fab").textContent=fl[n]||"+ Novo serviço";
+function setTab(n){if(!TABS.includes(n))n="agenda";const mudou=tab!==n;tab=n;for(const k of TABS){document.getElementById("p-"+k).hidden=k!==n;const b=document.getElementById("tab-"+k);if(k===n)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")}
+  const fl={estoque:"Cadastrar material",orcamentos:"Novo orçamento",clientes:"Novo cliente"},f=document.getElementById("fab");f.title=f.ariaLabel=fl[n]||"Novo serviço";f.setAttribute("aria-label",f.title);
+  if(mudou)window.scrollTo(0,0);
   try{localStorage.setItem("agenda-clima-tab",n)}catch(e){}}
 document.getElementById("fab").onclick=()=>tab==="estoque"?sheetMaterial(null):tab==="orcamentos"?sheetOrcamento(null):tab==="clientes"?sheetCliente(null):sheetServico(null);
 document.getElementById("novo-orc").onclick=()=>sheetOrcamento(null);
@@ -419,7 +482,6 @@ document.getElementById("novo-cliente").onclick=()=>sheetCliente(null);
 document.getElementById("busca").oninput=renderClientes;
 document.getElementById("busca-mat").oninput=renderEstoque;
 document.getElementById("novo-mat").onclick=()=>sheetMaterial(null);
-{const d=new Date();document.getElementById("today-label").textContent=WD[d.getDay()]+", "+d.getDate()+" de "+MES[d.getMonth()]+" de "+d.getFullYear()}
 try{const t=localStorage.getItem("agenda-clima-tab");if(t)setTab(t)}catch(e){}
 
 
@@ -444,11 +506,12 @@ $("esqueci").onclick=async()=>{const email=$("a-email").value.trim();if(!email){
 function mostrarVerify(u){$("verify-email").textContent=u.email;$("verify-msg").textContent="";mostrar("auth-verify")}
 $("ja-confirmei").onclick=async()=>{await reload(auth.currentUser);await auth.currentUser.getIdToken(true);if(auth.currentUser.emailVerified)entrar(auth.currentUser);else $("verify-msg").textContent="Ainda não aparece como confirmado. Abra o link do e-mail (veja também o spam) e toque aqui de novo."};
 $("reenviar").onclick=async()=>{try{await sendEmailVerification(auth.currentUser);$("verify-msg").textContent="E-mail reenviado."}catch(e){$("verify-msg").textContent=e.code==="auth/too-many-requests"?"Espere alguns minutos antes de reenviar.":"Não foi possível reenviar agora."}};
-for(const id of["sair","sair-verify"])$(id).onclick=()=>signOut(auth);
+$("sair-verify").onclick=()=>signOut(auth);
+$("conta").onclick=()=>sheetConta();
 
 function entrar(u){
   if(uidAtual===u.uid)return;uidAtual=u.uid;COLS.forEach(k=>S[k].clear());
-  $("user-label").textContent=u.displayName||u.email;mostrar("app");render();
+  nomeUser=u.displayName||"";$("user-ini").textContent=((u.displayName||u.email||"?").split(/[\s@.]+/).filter(Boolean).slice(0,2).map(x=>x[0]).join("")).toUpperCase();mostrar("app");render();
   $("storage-note").textContent="Dados salvos na sua conta. Entre com o mesmo login no celular ou computador para ver tudo.";
   unsubs=COLS.map(col=>onSnapshot(collection(fdb,"users",u.uid,col),snap=>{
     for(const ch of snap.docChanges()){if(ch.type==="removed")S[col].delete(ch.doc.id);else S[col].set(ch.doc.id,{...ch.doc.data()})}
