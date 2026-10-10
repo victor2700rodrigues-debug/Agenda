@@ -1,6 +1,6 @@
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {getAuth,onAuthStateChanged,GoogleAuthProvider,signInWithPopup,signInWithRedirect,createUserWithEmailAndPassword,signInWithEmailAndPassword,sendEmailVerification,sendPasswordResetEmail,signOut,reload,updateProfile} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import {initializeFirestore,persistentLocalCache,persistentMultipleTabManager,doc,setDoc,deleteDoc,collection,onSnapshot} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {initializeFirestore,persistentLocalCache,persistentMultipleTabManager,doc,setDoc,deleteDoc,collection,onSnapshot,getDocs} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {firebaseConfig} from "./firebase-config.js";
 
 const fapp=initializeApp(firebaseConfig);
@@ -92,6 +92,7 @@ function render(){
   renderAgenda(all,agendados,lembAtivos,t);renderLembretes(previstos,lembAtivos,t);renderClientes();renderEstoque();renderOrcamentos();
   const baixo=[...S.materiais.values()].filter(m=>m.minimo&&(+m.quantidade||0)<=+m.minimo).length;
   const be=document.getElementById("b-est");be.hidden=!baixo;be.textContent=baixo;
+  salvarContagem();
 }
 function renderAgenda(all,agendados,lembAtivos,t){
   const el=document.getElementById("p-agenda"),h=new Date().getHours(),d=parse(t);
@@ -158,9 +159,41 @@ function sheetMsg(id){const s=S.servicos.get(id),c=cli(s.clienteId),tem=waHref(c
     const tx=()=>bg.querySelector("#m-txt").value.trim();
     bg.querySelector("#cp").onclick=()=>navigator.clipboard?.writeText(tx()).then(()=>toast("Mensagem copiada"),()=>toast(tx()));
     const w=bg.querySelector("#wa");if(w)w.onclick=()=>{window.open(waHref(c,tx()),"_blank","noopener");close()}})}
+/* ---------- administrador ---------- */
+const ADMIN_EMAIL="victor2700rodrigues@gmail.com";
+const ehAdmin=()=>(auth.currentUser?.email||"").toLowerCase()===ADMIN_EMAIL;
+let carregadas=new Set(),ultContagem="",timerContagem=null;
+function salvarPerfil(u){
+  const prov=u.providerData.some(p=>p.providerId==="google.com")?"Google":"E-mail";
+  const criado=u.metadata?.creationTime?new Date(u.metadata.creationTime).toISOString():null;
+  setDoc(doc(fdb,"perfis",u.uid),{email:u.email||"",nome:u.displayName||"",provedor:prov,criadoEm:criado,ultimoAcesso:new Date().toISOString()},{merge:true}).catch(e=>console.error(e))}
+function salvarContagem(){
+  if(!uidAtual||carregadas.size<COLS.length)return;
+  const c={clientes:S.clientes.size,servicos:[...S.servicos.values()].filter(s=>s.status==="agendado"||s.status==="concluido").length,orcamentos:S.orcamentos.size};
+  const k=JSON.stringify(c);if(k===ultContagem)return;ultContagem=k;
+  clearTimeout(timerContagem);const uid0=uidAtual;
+  timerContagem=setTimeout(()=>setDoc(doc(fdb,"perfis",uid0),{contagem:c},{merge:true}).catch(e=>console.error(e)),2000)}
+const dataHora=s=>{if(!s)return"—";const d=new Date(s);return pad(d.getDate())+"/"+pad(d.getMonth()+1)+"/"+d.getFullYear()+" "+pad(d.getHours())+":"+pad(d.getMinutes())};
+async function sheetAdmin(){
+  openSheet(`<h3>Painel do administrador</h3><p class="meta">Carregando contas…</p>`);
+  let perfis;
+  try{perfis=(await getDocs(collection(fdb,"perfis"))).docs.map(d=>({uid:d.id,...d.data()}))}
+  catch(e){console.error(e);openSheet(`<h3>Painel do administrador</h3><p class="err">Sem permissão para ver as contas. Confira se as regras novas foram publicadas no Firebase.</p><div class="sheet-actions"><button data-close>Fechar</button></div>`);return}
+  perfis.sort((a,b)=>String(b.ultimoAcesso||"").localeCompare(String(a.ultimoAcesso||"")));
+  const agora=Date.now(),dia=864e5;
+  const ativos7=perfis.filter(p=>p.ultimoAcesso&&agora-new Date(p.ultimoAcesso)<=7*dia).length;
+  const novos30=perfis.filter(p=>p.criadoEm&&agora-new Date(p.criadoEm)<=30*dia).length;
+  const lista=q=>perfis.filter(p=>!q||(p.email+" "+p.nome).toLowerCase().includes(q)).map(p=>{const c=p.contagem||{};
+    return`<div class="card" style="padding-left:12px"><div class="top-row"><p class="nm">${esc(p.nome||p.email)}</p><span class="chip ${p.provedor==="Google"?"":"mute"}">${esc(p.provedor||"")}</span></div>
+     <p class="meta" style="margin:0">${esc(p.email)}<br>Conta criada: ${dataHora(p.criadoEm)} · Último acesso: ${dataHora(p.ultimoAcesso)}<br><b>${c.clientes??"—"}</b> clientes · <b>${c.servicos??"—"}</b> serviços · <b>${c.orcamentos??"—"}</b> orçamentos</p></div>`}).join("")||'<p class="meta">Nenhuma conta encontrada.</p>';
+  openSheet(`<h3>Painel do administrador</h3>
+   <div class="summary"><div class="stat"><b>${perfis.length}</b><span>Contas</span></div><div class="stat"><b>${ativos7}</b><span>Ativas em 7 dias</span></div><div class="stat"><b>${novos30}</b><span>Novas em 30 dias</span></div></div>
+   <input id="adm-busca" type="search" placeholder="Buscar por nome ou e-mail"><div class="group" id="adm-lista">${lista("")}</div>
+   <p class="meta">Contas aparecem aqui a partir do primeiro acesso depois desta atualização.</p>
+   <div class="sheet-actions"><button data-close>Fechar</button></div>`,bg=>{bg.querySelector("#adm-busca").oninput=e=>bg.querySelector("#adm-lista").innerHTML=lista(e.target.value.toLowerCase().trim())})}
 function sheetConta(){const u=auth.currentUser||{};
   openSheet(`<h3>${esc(u.displayName||"Sua conta")}</h3><p class="meta">${esc(u.email||"")}</p><div class="conta">
-   <button data-act="empresa-dados">Seus dados no PDF do orçamento</button>${!instalarBtn.hidden?'<button data-act="instalar">Instalar app no celular</button>':""}<button id="sair">Sair da conta</button></div>
+   ${ehAdmin()?'<button data-act="admin">Painel do administrador</button>':""}<button data-act="empresa-dados">Seus dados no PDF do orçamento</button>${!instalarBtn.hidden?'<button data-act="instalar">Instalar app no celular</button>':""}<button id="sair">Sair da conta</button></div>
    <div class="sheet-actions"><button data-close>Fechar</button></div>`,bg=>{bg.querySelector("#sair").onclick=()=>{close();signOut(auth)}})}
 function renderClientes(){
   const q=(document.getElementById("busca").value||"").toLowerCase().trim(),t=today(),all=svcs();
@@ -454,6 +487,7 @@ document.addEventListener("click",e=>{
     case"filtro":filtro=t.dataset.f;if(filtro==="concluidos"&&t.classList.contains("stat"))diaSel=null;render();if(t.classList.contains("stat"))document.querySelector("#p-agenda .days")?.scrollIntoView({behavior:"smooth",block:"start"});return;
     case"lseg":lembSeg=t.dataset.f;render();return;
     case"msg":return sheetMsg(id);
+    case"admin":return sheetAdmin();
     case"empresa-dados":return sheetEmpresa();
     case"instalar":close();return instalarBtn.click();
     case"concluir":return sheetConcluir(id);
@@ -510,10 +544,11 @@ $("sair-verify").onclick=()=>signOut(auth);
 $("conta").onclick=()=>sheetConta();
 
 function entrar(u){
-  if(uidAtual===u.uid)return;uidAtual=u.uid;COLS.forEach(k=>S[k].clear());
+  if(uidAtual===u.uid)return;uidAtual=u.uid;COLS.forEach(k=>S[k].clear());carregadas=new Set();ultContagem="";salvarPerfil(u);
   nomeUser=u.displayName||"";$("user-ini").textContent=((u.displayName||u.email||"?").split(/[\s@.]+/).filter(Boolean).slice(0,2).map(x=>x[0]).join("")).toUpperCase();mostrar("app");render();
   $("storage-note").textContent="Dados salvos na sua conta. Entre com o mesmo login no celular ou computador para ver tudo.";
   unsubs=COLS.map(col=>onSnapshot(collection(fdb,"users",u.uid,col),snap=>{
+    carregadas.add(col);
     for(const ch of snap.docChanges()){if(ch.type==="removed")S[col].delete(ch.doc.id);else S[col].set(ch.doc.id,{...ch.doc.data()})}
     render()},err=>{console.error(err);$("storage-note").textContent="Sem acesso aos dados agora. Recarregue a página."}))}
 onAuthStateChanged(auth,u=>{
