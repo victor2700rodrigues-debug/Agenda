@@ -6,9 +6,9 @@ Login com Google ou com e-mail e senha (com confirmação de e-mail). Cada conta
 
 ## Arquivos
 
-- `index.html`: telas de login e do app
-- `app.js`: toda a lógica
-- `firebase-config.js`: chaves do seu projeto Firebase (preencher)
+- `docs/index.html`: telas de login e do app
+- `docs/app.js`: toda a lógica
+- `docs/firebase-config.js`: chaves do seu projeto Firebase (preencher)
 - `firestore.rules`: regras que protegem os dados de cada conta
 
 ## Configurar o Firebase (uma vez)
@@ -22,6 +22,6 @@ Login com Google ou com e-mail e senha (com confirmação de e-mail). Cada conta
 
 ## Publicar
 
-No GitHub: **Settings > Pages > Build and deployment > Source: Deploy from a branch**, branch **main**, pasta **/ (root)**, **Save**. O site fica em `https://victor2700rodrigues-debug.github.io/Agenda/` e é atualizado a cada push na `main`.
+No GitHub: **Settings > Pages > Build and deployment > Source: Deploy from a branch**, branch **main**, pasta **/docs**, **Save**. O site fica em `https://victor2700rodrigues-debug.github.io/Agenda/` e é atualizado a cada push na `main`.
 
-Para testar no computador: `python3 -m http.server` nesta pasta e abra http://localhost:8000.
+Para testar no computador: `python3 -m http.server` dentro de `docs/` e abra http://localhost:8000.
